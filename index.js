@@ -15,7 +15,7 @@ const fs = require('fs').promises;
 const axios = require('axios');
 
 // --- Bot Settings ---
-const token = '8263135329:AAEgqXeB9CXI2kMPOWOCRWtnq8qwzxhyXEE'; 
+const token = '8263135329:AAEgqXeB9CXI2kMPOWOCRWtnq8qwzxhyXEE';
 
 // --- Express Server to keep the bot alive ---
 const app = express();
@@ -42,10 +42,11 @@ process.on('uncaughtException', (error) => {
 });
 
 // ==========================================
-// 🛡️ ANTI-DUPLICATE SYSTEM (يمنع تكرار الرسائل)
+// 🛡️ ANTI-DUPLICATE SYSTEM
 // ==========================================
 const processedUpdates = new Set();
 function isDuplicate(id) {
+    if (!id) return false;
     if (processedUpdates.has(id)) return true;
     processedUpdates.add(id);
     if (processedUpdates.size > 1000) {
@@ -327,4 +328,70 @@ bot.on('message', async (msg) => {
             code = code?.match(/.{1,4}/g)?.join('-') || code;
             
             bot.sendMessage(chatId, `✅ *Pairing code generated successfully!*\n\nاضغط على الكود للنسخ:\n\`${code}\`\n\n📌 *Activation steps:*\n1. Open WhatsApp on your phone.\n2. Go to Linked Devices.\n3. Select "Link a device".\n4. Select "Link with phone number instead".\n5. Enter the code above 👆`, { parse_mode: 'Markdown' });
-        } catch
+        } catch (e) { 
+            bot.sendMessage(chatId, `❌ *Failed to request code!*\nReason: The session might be stuck or the number is invalid.\n\n*Solution:* Send /reset then try /pair again.\n\nError Log: ${e.message}`, { parse_mode: 'Markdown' }); 
+        }
+        return;
+    }
+
+    // Receiving numbers file
+    if (msg.document && msg.document.file_name && msg.document.file_name.endsWith('.txt')) {
+        bot.sendMessage(chatId, "⏳ *Reading file and extracting numbers...*", { parse_mode: 'Markdown' });
+        try {
+            const fileLink = await bot.getFileLink(msg.document.file_id);
+            const response = await axios.get(fileLink);
+            const dataStr = typeof response.data === 'string' ? response.data : JSON.stringify(response.data);
+            const numbers = dataStr.match(/\d+/g);
+            
+            if (numbers && numbers.length > 0) {
+                state.queue = state.queue.concat(numbers);
+                bot.sendMessage(chatId, `📩 *Extracted ${numbers.length} numbers from file.*\n🚀 Starting scan immediately...`, { parse_mode: 'Markdown' });
+                processQueue(chatId);
+            } else {
+                bot.sendMessage(chatId, "⚠️ *No valid numbers found in the file.*", { parse_mode: 'Markdown' });
+            }
+        } catch (error) {
+            bot.sendMessage(chatId, "❌ *Failed to read file.* Make sure it's a valid .txt file.", { parse_mode: 'Markdown' });
+        }
+        return;
+    }
+
+    // Receiving plain text numbers
+    const numbers = text.match(/\d+/g);
+    if (numbers && !text.startsWith('/')) {
+        state.queue = state.queue.concat(numbers);
+        bot.sendMessage(chatId, `📩 *Received ${numbers.length} numbers.*\n🚀 Starting scan...`, { parse_mode: 'Markdown' });
+        processQueue(chatId);
+    }
+});
+
+bot.on('callback_query', async (query) => {
+    // 🛑 تطبيق نظام منع التكرار على الأزرار 🛑
+    if (isDuplicate(query.id)) return;
+
+    const chatId = query.message.chat.id;
+    const data = query.data;
+    const state = getUserState(chatId);
+
+    if (data === 'start_scan') {
+        bot.sendMessage(chatId, "📩 *How to scan:*\nSend numbers directly here as a message, or upload a `.txt` file containing the numbers.", { parse_mode: 'Markdown' });
+        bot.answerCallbackQuery(query.id);
+    } else if (data === 'status_wa') {
+        const status = sock?.ws?.isOpen ? `✅ *Status:* Connected\n📱 *Number:* +${sock.user?.id.split(':')[0]}` : "❌ *Status:* Disconnected";
+        bot.answerCallbackQuery(query.id, { text: sock?.ws?.isOpen ? "Connected ✅" : "Disconnected ❌", show_alert: true });
+        bot.sendMessage(chatId, status, { parse_mode: 'Markdown' });
+    } else if (data === 'logout_wa') {
+        await handleLogout(chatId);
+        bot.answerCallbackQuery(query.id, { text: "Logout requested 🚪" });
+    } else if (data === 'pair_wa') {
+        state.waitingForPair = true;
+        bot.sendMessage(chatId, "📲 *Send the WhatsApp number now in international format*\n*(Example: 967712345678)*\n\n⚠️ _Without + or leading zeros_", { parse_mode: 'Markdown' });
+        bot.answerCallbackQuery(query.id);
+    } else if (data === 'cancel_scan') {
+        state.stopSignal = true;
+        bot.answerCallbackQuery(query.id, { text: "🛑 Stopping scan..." });
+    }
+});
+
+// Start Bot
+startBot();
