@@ -3,6 +3,7 @@
  * 100% English Edition - Fixed Pairing Code & Session Issues
  * + Real-time reporting for numbers without WA (1-tap copy)
  * + Speed Optimizations
+ * + Anti-Crash System for Render
  */
 
 const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, DisconnectReason, Browsers } = require("@whiskeysockets/baileys");
@@ -22,6 +23,28 @@ app.get('/', (req, res) => res.send('WhatsApp Filter Bot is Running 🟢 (VIP Ed
 app.listen(port, () => console.log(`🌐 [SERVER] Server is now running on port: ${port}`));
 
 const bot = new TelegramBot(token, { polling: true });
+
+// ==========================================
+// 🛡️ ANTI-CRASH SYSTEM (FIX FOR RENDER EFATAL)
+// ==========================================
+bot.on('polling_error', (error) => {
+    // تجاهل أخطاء الاتصال بدلاً من إيقاف السيرفر
+    console.log(`⚠️ [Polling Warning]: ${error.code} - Bot is still running...`);
+});
+
+bot.on('error', (error) => {
+    console.log(`⚠️ [Bot Error]: ${error.message}`);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.log('⚠️ [Unhandled Rejection]:', reason);
+});
+
+process.on('uncaughtException', (error) => {
+    console.log('⚠️ [Uncaught Exception]:', error.message);
+});
+// ==========================================
+
 const sessionFolder = 'auth_session_bot';
 let sock;
 
@@ -310,4 +333,3 @@ bot.on('callback_query', async (query) => {
 
 // Start Bot
 startBot();
-
